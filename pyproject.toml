@@ -1,0 +1,56 @@
+[project]
+name = "tree-cloud-drive"
+version = "0.1.0"
+description = "Python desktop GUI which shows an jinteractive tree view of a selected cloud drive folder using rclone for retrieving cloud file and folder information."
+readme = "README.md"
+requires-python = ">=3.13.11"
+license = { text = "MIT" }
+authors = [{ name = "Rich Lewis" }]
+# Author: Rich Lewis - GitHub: @RichLewis007
+
+dependencies = [
+  "PySide6==6.7.3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-qt>=4.4.0",
+  "ruff>=0.5.0",
+  "pyright>=1.1.380",
+  "watchdog>=6.0.0",
+]
+
+[project.scripts]
+tree-cloud-drive = "tree_cloud_drive.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tree_cloud_drive"]
+include = ["src/tree_cloud_drive/assets/**"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/tree_cloud_drive/**",
+  "tests/**",
+  "docs/**",
+  "CHANGELOG.md",
+  "README.md",
+  "LICENSE",
+  "pyproject.toml",
+]
+
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"

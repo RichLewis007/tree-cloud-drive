@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SplitterDockContents</class>
+ <widget class="QWidget" name="SplitterDockContents">
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QSplitter" name="splitter">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <widget class="QLabel" name="topLabel">
+      <property name="text">
+       <string>Top Panel
+
+Resize by dragging the handle below.</string>
+      </property>
+      <property name="styleSheet">
+       <string>background-color: #e0e0e0; padding: 10px;</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="bottomLabel">
+      <property name="text">
+       <string>Bottom Panel
+
+This splitter can be resized.</string>
+      </property>
+      <property name="styleSheet">
+       <string>background-color: #f0f0f0; padding: 10px;</string>
+      </property>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
+
+
