@@ -28,22 +28,22 @@ def main() -> None:
     replace_in_file(
         repo_root / "pyproject.toml",
         r'^(version\\s*=\\s*")\\d+\\.\\d+\\.\\d+(")$',
-        rf'\\1{version}\\2',
+        rf"\\1{version}\\2",
     )
     replace_in_file(
         repo_root / "README.md",
-        r'^(\\*\\*Version:\\*\\*\\s*)\\d+\\.\\d+\\.\\d+$',
-        rf'\\1{version}',
+        r"^(\\*\\*Version:\\*\\*\\s*)\\d+\\.\\d+\\.\\d+$",
+        rf"\\1{version}",
     )
     replace_in_file(
         repo_root / "src/tree_cloud_drive/app.py",
-        r'^(#\\s*Version:\\s*)\\d+\\.\\d+\\.\\d+$',
-        rf'\\1{version}',
+        r"^(#\\s*Version:\\s*)\\d+\\.\\d+\\.\\d+$",
+        rf"\\1{version}",
     )
     replace_in_file(
         repo_root / "src/tree_cloud_drive/core/paths.py",
         r'^(_DEFAULT_VERSION\\s*=\\s*")\\d+\\.\\d+\\.\\d+(")',
-        rf'\\1{version}\\2',
+        rf"\\1{version}\\2",
     )
 
     print(f"Updated version to {version}")

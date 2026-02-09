@@ -26,7 +26,11 @@ from .core.single_instance import SingleInstanceGuard
 from .main_window import MainWindow
 
 
-def run(splash_screen_seconds: int | None = None, force_no_splash: bool = False) -> int:
+def run(
+    splash_screen_seconds: int | None = None,
+    force_no_splash: bool = False,
+    rclone_debug: bool | None = None,
+) -> int:
     """Create the QApplication, wire services, and start the event loop.
 
     This function handles all application initialization:
@@ -60,6 +64,8 @@ def run(splash_screen_seconds: int | None = None, force_no_splash: bool = False)
         return 0
 
     settings = Settings()
+    if rclone_debug is not None:
+        settings.set_rclone_debug_enabled(rclone_debug)
 
     # Load packaged assets via importlib.resources so this works from wheels.
     # Apply theme from settings

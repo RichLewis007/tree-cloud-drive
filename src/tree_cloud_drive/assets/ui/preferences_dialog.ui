@@ -45,6 +45,13 @@
        </property>
       </widget>
      </item>
+     <item row="3" column="0" colspan="2">
+      <widget class="QCheckBox" name="rcloneDebugCheckBox">
+       <property name="text">
+        <string>Enable rclone debug logging</string>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
    <item>

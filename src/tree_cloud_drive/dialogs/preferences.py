@@ -43,6 +43,7 @@ class PreferencesDialog(QDialog):
         self.theme_combo: QComboBox
         self.splash_enabled_check: QCheckBox
         self.splash_seconds_spin: QSpinBox
+        self.rclone_debug_check: QCheckBox
 
         self._ui = load_ui("preferences_dialog.ui", self)
         main_layout = QVBoxLayout(self)
@@ -81,6 +82,12 @@ class PreferencesDialog(QDialog):
         self.splash_enabled_check.toggled.connect(self.splash_seconds_spin.setEnabled)
         self.splash_enabled_check.toggled.connect(splash_seconds_label.setEnabled)
 
+        rclone_debug_check = self._ui.findChild(QCheckBox, "rcloneDebugCheckBox")
+        if rclone_debug_check is None:
+            raise RuntimeError("rcloneDebugCheckBox not found in preferences_dialog.ui")
+        self.rclone_debug_check = rclone_debug_check
+        self.rclone_debug_check.setChecked(self._settings.get_rclone_debug_enabled())
+
         reset_button = self._ui.findChild(QPushButton, "resetToDefaultsButton")
         if reset_button is None:
             raise RuntimeError("resetToDefaultsButton not found in preferences_dialog.ui")
@@ -118,6 +125,7 @@ class PreferencesDialog(QDialog):
             else:
                 splash_value = 0
             self.splash_seconds_spin.setValue(splash_value)
+            self.rclone_debug_check.setChecked(self._settings.get_rclone_debug_enabled())
 
     def accept(self) -> None:
         """Validate and save preferences."""
@@ -145,6 +153,9 @@ class PreferencesDialog(QDialog):
         else:
             # Not enabled, remove setting (defaults to None = don't show)
             self._settings.set_splash_screen_seconds(None)
+
+        # Save rclone debug preference
+        self._settings.set_rclone_debug_enabled(self.rclone_debug_check.isChecked())
 
         if old_theme != new_theme:
             self.theme_changed.emit(new_theme)

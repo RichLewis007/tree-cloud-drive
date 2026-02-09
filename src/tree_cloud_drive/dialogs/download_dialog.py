@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QProgressBar,
+    QPushButton,
     QVBoxLayout,
 )
 
@@ -89,7 +89,9 @@ class DownloadDialog(QDialog):
         self.setLayout(layout)
 
     def _browse_dest(self) -> None:
-        dest = QFileDialog.getExistingDirectory(self, "Select download folder", self.dest_edit.text())
+        dest = QFileDialog.getExistingDirectory(
+            self, "Select download folder", self.dest_edit.text()
+        )
         if dest:
             self.dest_edit.setText(dest)
 

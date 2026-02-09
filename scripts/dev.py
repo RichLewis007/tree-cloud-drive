@@ -14,7 +14,8 @@ from watchdog.observers import Observer
 
 class AppRestartHandler(FileSystemEventHandler):
     """Handles file changes and restarts the app."""
-# Author: Rich Lewis - GitHub: @RichLewis007
+
+    # Author: Rich Lewis - GitHub: @RichLewis007
 
     def __init__(self, script_path, restart_callback):
         super().__init__()

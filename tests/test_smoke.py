@@ -9,7 +9,7 @@ from tree_cloud_drive.core.ui_loader import ui_bytes
 def test_constructs(main_window):
     """Main window constructs with a title and default UI."""
 
-# Author: Rich Lewis - GitHub: @RichLewis007
+    # Author: Rich Lewis - GitHub: @RichLewis007
 
     assert main_window.windowTitle()
 

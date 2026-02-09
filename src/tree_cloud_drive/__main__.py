@@ -34,19 +34,38 @@ def main() -> int:
         action="store_true",
         help="Don't show splash screen on startup (overrides settings)",
     )
+    debug_group = parser.add_mutually_exclusive_group()
+    debug_group.add_argument(
+        "--rclone-debug",
+        action="store_true",
+        help="Enable rclone debug logging (overrides settings)",
+    )
+    debug_group.add_argument(
+        "--no-rclone-debug",
+        action="store_true",
+        help="Disable rclone debug logging (overrides settings)",
+    )
 
     args = parser.parse_args()
 
     # Handle splash screen arguments (mutually exclusive, so only one can be set)
     if args.no_splash:
         # Explicitly don't show splash screen (override settings)
-        return run(force_no_splash=True)
+        return run(force_no_splash=True, rclone_debug=_resolve_debug_flag(args))
     elif getattr(args, "splash_seconds", None) is not None:
         # Explicitly set splash screen duration
-        return run(splash_screen_seconds=args.splash_seconds)
+        return run(splash_screen_seconds=args.splash_seconds, rclone_debug=_resolve_debug_flag(args))
     else:
         # No argument provided - check settings (pass None to let app.py check settings)
-        return run(splash_screen_seconds=None)
+        return run(splash_screen_seconds=None, rclone_debug=_resolve_debug_flag(args))
+
+
+def _resolve_debug_flag(args: argparse.Namespace) -> bool | None:
+    if getattr(args, "rclone_debug", False):
+        return True
+    if getattr(args, "no_rclone_debug", False):
+        return False
+    return None
 
 
 if __name__ == "__main__":

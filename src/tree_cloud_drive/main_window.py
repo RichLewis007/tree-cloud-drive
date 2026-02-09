@@ -14,9 +14,9 @@ accessed programmatically for signal/slot connections.
 from __future__ import annotations
 
 import subprocess
-import time
+from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QPoint, QSize, Qt, Slot, QStandardPaths
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -27,23 +27,27 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygon,
     QShortcut,
+    QTextCursor,
 )
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
     QLabel,
-    QComboBox,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QTabWidget,
+    QTextEdit,
+    QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
-    QToolBar,
     QWidget,
 )
 
+from .core.history import HistoryStore
 from .core.paths import APP_NAME
 from .core.settings import Settings
 from .core.ui_loader import load_ui
@@ -62,19 +66,16 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.pool = WorkerPool()
         self.window_state = WindowStateManager(settings, self)
-        self.action_work: QAction
         self.action_prefs: QAction
         self.action_quit: QAction
         self.action_about: QAction
-        self.active_worker: Worker[str] | None
         self.label: QLabel
-        self.progress_bar: QProgressBar
-        self.btn_work: QPushButton
-        self.btn_cancel: QPushButton
-        self.btn_prefs: QPushButton
         self.remote_combo: QComboBox
         self.folder_combo: QComboBox
         self.folder_tree: QTreeWidget
+        self.history_list: QListWidget
+        self.clear_history_button: QPushButton
+        self.debug_log_view: QTextEdit | None
         self.ui: QWidget
         self.tab_widget: QTabWidget
         self.view_menu: QMenu
@@ -82,30 +83,33 @@ class MainWindow(QMainWindow):
         self.folder_worker: Worker[list[str]] | None
         self.tree_worker: Worker[list[str]] | None
         self._tree_remote: str | None
+        self._pending_history_folder: str | None
+        self.history_store: HistoryStore
 
         self.setWindowTitle(APP_NAME)
+
+        self.history_store = HistoryStore()
+        self.debug_log_view = None
 
         self._build_actions()
         self._build_menus()  # Build menus before loading UI so dock widgets can add to View menu
         self._load_ui()
-        self.active_worker = None
         self.remote_worker = None
         self.folder_worker = None
         self.tree_worker = None
         self._tree_remote = None
+        self._pending_history_folder = None
 
         # Create horizontal toolbar with square icon buttons
         toolbar = self._create_toolbar()
         self.addToolBar(toolbar)
 
-        self.btn_work.clicked.connect(self.on_run_work)
-        self.btn_cancel.clicked.connect(self.on_cancel_work)
-        self.btn_prefs.clicked.connect(self.on_open_prefs)
         self.remote_combo.currentIndexChanged.connect(self._on_remote_selected)
         self.folder_combo.currentIndexChanged.connect(self._on_folder_selected)
         self.folder_tree.itemExpanded.connect(self._on_tree_item_expanded)
         self.folder_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.folder_tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+        self.history_list.itemClicked.connect(self._on_history_item_clicked)
 
         # Restore window geometry and state
         self.window_state.restore_state()
@@ -116,10 +120,11 @@ class MainWindow(QMainWindow):
         # Load available remotes on startup
         self._load_remotes()
 
-    def _build_actions(self) -> None:
-        self.action_work = QAction("Run background work", self)
-        self.action_work.triggered.connect(self.on_run_work)
+        # Debug log tab (optional)
+        if self.settings.get_rclone_debug_enabled():
+            self._ensure_debug_log_tab()
 
+    def _build_actions(self) -> None:
         self.action_prefs = QAction("Preferences", self)
         self.action_prefs.triggered.connect(self.on_open_prefs)
 
@@ -147,12 +152,10 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(icon_size)
 
         # Create icons for actions
-        self.action_work.setIcon(self._create_icon_for_action("work"))
         self.action_prefs.setIcon(self._create_icon_for_action("preferences"))
         self.action_quit.setIcon(self._create_icon_for_action("quit"))
 
         # Add actions to toolbar
-        toolbar.addAction(self.action_work)
         toolbar.addAction(self.action_prefs)
         toolbar.addSeparator()  # Visual separator before quit button
         toolbar.addAction(self.action_quit)
@@ -226,7 +229,6 @@ class MainWindow(QMainWindow):
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self.action_prefs)
-        file_menu.addSeparator()
         file_menu.addAction(self.action_quit)
 
         view_menu = self.menuBar().addMenu("&View")
@@ -255,29 +257,6 @@ class MainWindow(QMainWindow):
             raise RuntimeError("statusLabel not found in main_window.ui")
         self.label = label
 
-        progress_bar = self.ui.findChild(QProgressBar, "progressBar")
-        if progress_bar is None:
-            raise RuntimeError("progressBar not found in main_window.ui")
-        self.progress_bar = progress_bar
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("Idle")
-
-        btn_work = self.ui.findChild(QPushButton, "workButton")
-        if btn_work is None:
-            raise RuntimeError("workButton not found in main_window.ui")
-        self.btn_work = btn_work
-
-        btn_cancel = self.ui.findChild(QPushButton, "cancelButton")
-        if btn_cancel is None:
-            raise RuntimeError("cancelButton not found in main_window.ui")
-        self.btn_cancel = btn_cancel
-        self.btn_cancel.setEnabled(False)
-
-        btn_prefs = self.ui.findChild(QPushButton, "prefsButton")
-        if btn_prefs is None:
-            raise RuntimeError("prefsButton not found in main_window.ui")
-        self.btn_prefs = btn_prefs
 
         remote_combo = self.ui.findChild(QComboBox, "remoteCombo")
         if remote_combo is None:
@@ -300,6 +279,7 @@ class MainWindow(QMainWindow):
         self.folder_tree = folder_tree
         self.folder_tree.clear()
         self.folder_tree.setHeaderHidden(True)
+        self._refresh_history_list()
 
     def _set_tree_placeholder(self, item: QTreeWidgetItem) -> None:
         placeholder = QTreeWidgetItem(["Loading..."])
@@ -336,10 +316,62 @@ class MainWindow(QMainWindow):
             capture_output=True,
             text=True,
         )
+        if self.settings.get_rclone_debug_enabled():
+            self._log_rclone_debug(args, result.stdout, result.stderr, result.returncode)
         if result.returncode != 0:
             msg = result.stderr.strip() or result.stdout.strip() or "Unknown rclone error"
             raise RuntimeError(msg)
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _log_rclone_debug(
+        self, args: list[str], stdout: str, stderr: str, returncode: int
+    ) -> None:
+        try:
+            base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+            log_path = Path(base) / "rclone-debug.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write("\n=== rclone run ===\n")
+                f.write(f"Command: rclone {' '.join(args)}\n")
+                f.write(f"Return code: {returncode}\n")
+                if stdout:
+                    f.write("STDOUT:\n")
+                    f.write(stdout)
+                    if not stdout.endswith("\n"):
+                        f.write("\n")
+                if stderr:
+                    f.write("STDERR:\n")
+                    f.write(stderr)
+                    if not stderr.endswith("\n"):
+                        f.write("\n")
+            self._refresh_debug_log_view()
+        except Exception:
+            pass
+
+    def _ensure_debug_log_tab(self) -> None:
+        if self.debug_log_view is not None:
+            return
+        self.debug_log_view = QTextEdit(self)
+        self.debug_log_view.setReadOnly(True)
+        self.debug_log_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.tab_widget.addTab(self.debug_log_view, "Debug Log")
+        self._refresh_debug_log_view()
+
+    def _refresh_debug_log_view(self) -> None:
+        if self.debug_log_view is None:
+            return
+        try:
+            base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+            log_path = Path(base) / "rclone-debug.log"
+            if not log_path.exists():
+                self.debug_log_view.setPlainText("No debug log yet.")
+                return
+            self.debug_log_view.setPlainText(log_path.read_text(encoding="utf-8"))
+            cursor = self.debug_log_view.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.debug_log_view.setTextCursor(cursor)
+        except Exception:
+            self.debug_log_view.setPlainText("Failed to load debug log.")
 
     def _load_remotes(self) -> None:
         if self.remote_worker is not None:
@@ -387,6 +419,7 @@ class MainWindow(QMainWindow):
             self.folder_combo.clear()
             self.folder_combo.addItem("Select a folder...")
             self.folder_tree.clear()
+            self._pending_history_folder = None
             return
         remote = self.remote_combo.currentText()
         self._load_top_level_dirs(remote)
@@ -414,6 +447,11 @@ class MainWindow(QMainWindow):
                 self.folder_combo.addItems(sorted(dirs))
                 self.folder_combo.setEnabled(True)
                 self._set_status("Select a top-level folder.")
+                if self._pending_history_folder and self._pending_history_folder in dirs:
+                    idx = self.folder_combo.findText(self._pending_history_folder)
+                    if idx >= 0:
+                        self.folder_combo.setCurrentIndex(idx)
+                self._pending_history_folder = None
             else:
                 self.folder_combo.setEnabled(False)
                 self._set_status("No folders found in remote.")
@@ -439,6 +477,8 @@ class MainWindow(QMainWindow):
             return
         remote = self.remote_combo.currentText()
         folder = self.folder_combo.currentText()
+        self.history_store.record(remote, folder)
+        self._refresh_history_list()
         self._load_folder_tree(remote, folder)
 
     def _load_folder_tree(self, remote: str, folder: str) -> None:
@@ -459,7 +499,9 @@ class MainWindow(QMainWindow):
 
         def work(ctx: WorkContext) -> list[str]:
             ctx.check_cancelled()
-            dirs = self._run_rclone(["lsf", "--dirs-only", "--max-depth", "1", f"{remote}:{folder}"])
+            dirs = self._run_rclone(
+                ["lsf", "--dirs-only", "--max-depth", "1", f"{remote}:{folder}"]
+            )
             return [d.rstrip("/") for d in dirs]
 
         def done(dirs: list[str]) -> None:
@@ -480,8 +522,15 @@ class MainWindow(QMainWindow):
 
     def _populate_children(self, parent: QTreeWidgetItem, paths: list[str]) -> None:
         base_path = self._get_item_path(parent)
-        for path in sorted(paths):
-            name = path.split("/")[-1] if path else path
+        seen: set[str] = set()
+        for raw in sorted(paths):
+            path = raw.strip().strip("/")
+            if not path or path == ".":
+                continue
+            name = path.split("/")[-1]
+            if name in seen:
+                continue
+            seen.add(name)
             item = QTreeWidgetItem([name])
             full_path = f"{base_path}/{path}" if base_path else path
             self._set_item_path(item, full_path)
@@ -499,9 +548,7 @@ class MainWindow(QMainWindow):
             return
         self._load_children_for_item(item, self._tree_remote, path)
 
-    def _load_children_for_item(
-        self, item: QTreeWidgetItem, remote: str, path: str
-    ) -> None:
+    def _load_children_for_item(self, item: QTreeWidgetItem, remote: str, path: str) -> None:
         if self.tree_worker is not None:
             self.tree_worker.cancel()
             self.tree_worker = None
@@ -529,6 +576,36 @@ class MainWindow(QMainWindow):
         req = WorkRequest(fn=work, on_done=done, on_error=error)
         self.tree_worker = self.pool.submit(req)
 
+    def _refresh_history_list(self) -> None:
+        self.history_list.clear()
+        records = self.history_store.recent()
+        if not records:
+            item = QListWidgetItem("No history yet.")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self.history_list.addItem(item)
+            return
+        for rec in records:
+            item = QListWidgetItem(f"{rec.remote}:{rec.folder}")
+            font = item.font()
+            font.setUnderline(True)
+            item.setFont(font)
+            item.setData(Qt.ItemDataRole.UserRole, (rec.remote, rec.folder))
+            self.history_list.addItem(item)
+
+    def _on_history_item_clicked(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        remote, folder = data
+        self._pending_history_folder = folder
+        idx = self.remote_combo.findText(remote)
+        if idx >= 0:
+            self.remote_combo.setCurrentIndex(idx)
+
+    def _on_clear_history(self) -> None:
+        self.history_store.clear()
+        self._refresh_history_list()
+
     def _on_tree_context_menu(self, pos) -> None:  # type: ignore[override]
         item = self.folder_tree.itemAt(pos)
         if item is None or self._tree_remote is None:
@@ -552,6 +629,15 @@ class MainWindow(QMainWindow):
 
         # Load UI from .ui file
         info_widget = load_ui("information_dock.ui", self)
+        history_list = info_widget.findChild(QListWidget, "historyList")
+        if history_list is None:
+            raise RuntimeError("historyList not found in information_dock.ui")
+        self.history_list = history_list
+        clear_btn = info_widget.findChild(QPushButton, "clearHistoryButton")
+        if clear_btn is None:
+            raise RuntimeError("clearHistoryButton not found in information_dock.ui")
+        self.clear_history_button = clear_btn
+        self.clear_history_button.clicked.connect(self._on_clear_history)
         info_dock.setWidget(info_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, info_dock)
         # Add toggle action to View menu
@@ -576,6 +662,13 @@ class MainWindow(QMainWindow):
         dlg = PreferencesDialog(settings=self.settings, parent=self)
         dlg.theme_changed.connect(self._on_theme_changed)
         dlg.exec()
+        if self.settings.get_rclone_debug_enabled():
+            self._ensure_debug_log_tab()
+        elif self.debug_log_view is not None:
+            idx = self.tab_widget.indexOf(self.debug_log_view)
+            if idx >= 0:
+                self.tab_widget.removeTab(idx)
+            self.debug_log_view = None
 
     def _on_theme_changed(self, theme: str) -> None:
         """Handle theme change from preferences dialog.
@@ -610,112 +703,6 @@ class MainWindow(QMainWindow):
         dlg = AboutDialog(version=app_version(), release_notes_url="", parent=self)
         dlg.exec()
 
-    def _set_working_state(self, working: bool) -> None:
-        """Update UI state to reflect whether background work is running.
-
-        Args:
-            working: True if work is in progress, False otherwise
-        """
-        self.btn_work.setEnabled(not working)
-        self.action_work.setEnabled(not working)
-        self.btn_cancel.setEnabled(working)
-
-    @Slot()
-    def on_run_work(self) -> None:
-        """Start a background work task with progress tracking.
-
-        Demonstrates the worker system with a simple task that:
-        - Runs in a background thread
-        - Reports progress updates
-        - Supports cancellation
-        - Updates UI safely via signals/callbacks
-        """
-        if self.active_worker is not None:
-            QMessageBox.information(self, "Background work", "Work is already running.")
-            return
-
-        # Initialize UI for work
-        self.label.setText("Working in background...")
-        self.statusBar().showMessage("Working in background...")
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("Working... %p%")
-        self._set_working_state(True)
-
-        def work(ctx: WorkContext) -> str:
-            """Background work function - runs in worker thread.
-
-            This function demonstrates:
-            - Checking for cancellation
-            - Reporting progress
-            - Returning a result
-            """
-            steps = 10
-            for step in range(steps):
-                ctx.check_cancelled()  # Cooperative cancellation check
-                time.sleep(0.25)  # Simulate work
-                percent = int(((step + 1) / steps) * 100)
-                ctx.progress(percent, f"Step {step + 1} of {steps}")
-            return "Done."
-
-        def progress(percent: int, message: str) -> None:
-            """Progress callback - runs on main thread via signal."""
-            self.progress_bar.setValue(percent)
-            if message:
-                self.label.setText(message)
-                self.statusBar().showMessage(message, 2000)
-
-        def done(result: str) -> None:
-            """Completion callback - runs on main thread when worker finishes."""
-            self.progress_bar.setValue(100)
-            self.progress_bar.setFormat("Done")
-            self.label.setText(result)
-            self.statusBar().showMessage("Background work finished", 3000)
-            self._set_working_state(False)
-            self.active_worker = None
-
-        def cancelled() -> None:
-            """Cancellation callback - runs on main thread when work is cancelled."""
-            self.progress_bar.setValue(0)
-            self.progress_bar.setFormat("Cancelled")
-            self.label.setText("Cancelled")
-            self.statusBar().showMessage("Background work cancelled", 3000)
-            self._set_working_state(False)
-            self.active_worker = None
-
-        def error(msg: str) -> None:
-            """Error callback - runs on main thread when work fails."""
-            self.progress_bar.setValue(0)
-            self.progress_bar.setFormat("Error")
-            self.label.setText("Error")
-            self.statusBar().showMessage("Background work failed", 3000)
-            self._set_working_state(False)
-            self.active_worker = None
-            QMessageBox.critical(self, "Worker error", msg)
-
-        req = WorkRequest(
-            fn=work,
-            on_done=done,
-            on_error=error,
-            on_progress=progress,
-            on_cancel=cancelled,
-        )
-        self.active_worker = self.pool.submit(req)
-
-    @Slot()
-    def on_cancel_work(self) -> None:
-        """Cancel the currently running background work task.
-
-        Sends a cancellation request to the worker and updates the UI.
-        The worker will check for cancellation at the next check_cancelled()
-        call and exit cooperatively.
-        """
-        if self.active_worker is None:
-            return
-        self.active_worker.cancel()
-        self.label.setText("Cancel requested...")
-        self.statusBar().showMessage("Cancel requested...", 3000)
-        self.btn_cancel.setEnabled(False)
-
     @Slot()
     def on_quit(self) -> None:
         """Handle quit action with proper cleanup.
@@ -723,46 +710,11 @@ class MainWindow(QMainWindow):
         Checks for running background workers and handles them appropriately.
         If a worker is running, asks the user if they want to cancel it and exit.
         """
-        # Check if there's an active worker
-        if self.active_worker is not None:
-            reply = QMessageBox.question(
-                self,
-                "Exit Application",
-                "A background task is currently running.\n\n"
-                "Do you want to cancel the task and exit?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-
-            if reply == QMessageBox.StandardButton.No:
-                # User cancelled the quit dialog
-                return
-            # User chose Yes - cancel the worker and exit
-            self.active_worker.cancel()
-            self.label.setText("Cancelling task before exit...")
-            self.statusBar().showMessage("Cancelling task before exit...", 2000)
-
-            # Give the worker a brief moment to cancel cooperatively
-            # The closeEvent will also handle cleanup if the worker is still running
-            def delayed_close() -> None:
-                """Close after a brief delay to allow cancellation."""
-                self.close()
-
-            QTimer.singleShot(500, delayed_close)  # Wait 500ms
-            return
-
-        # No active worker - exit immediately
         self.close()
 
     def _setup_command_palette(self) -> None:
         """Initialize command palette with commands and keyboard shortcut."""
         commands = [
-            Command(
-                name="Run Background Work",
-                description="Execute background task",
-                shortcut="",
-                action=self.on_run_work,
-            ),
             Command(
                 name="Preferences",
                 description="Open preferences dialog",
@@ -813,11 +765,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         """Save window state before closing and cleanup resources."""
-        # Cancel any active worker if still running
-        if self.active_worker is not None:
-            self.active_worker.cancel()
-            self.active_worker = None
-
         # Save window state
         self.window_state.save_state()
 

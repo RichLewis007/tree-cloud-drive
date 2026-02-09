@@ -26,6 +26,7 @@ class SettingsKeys:
     window_geometry: str = "window/geometry"
     window_state: str = "window/state"
     splash_screen_seconds: str = "ui/splash_screen_seconds"
+    rclone_debug: str = "rclone/debug"
 
 
 class Settings:
@@ -118,3 +119,14 @@ class Settings:
             self._qs.remove(self.keys.splash_screen_seconds)
         else:
             self._qs.setValue(self.keys.splash_screen_seconds, seconds)
+
+    def get_rclone_debug_enabled(self) -> bool:
+        value = self._qs.value(self.keys.rclone_debug, False)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    def set_rclone_debug_enabled(self, enabled: bool) -> None:
+        self._qs.setValue(self.keys.rclone_debug, bool(enabled))
