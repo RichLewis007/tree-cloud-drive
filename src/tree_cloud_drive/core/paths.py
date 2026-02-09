@@ -17,6 +17,7 @@ from pathlib import Path
 
 # Application metadata constants
 APP_NAME = "tree-cloud-drive"
+APP_DISPLAY_NAME = "Tree Cloud Drive"
 APP_ORG = "RichLewis.com"
 _ASSETS_DIR = "assets"  # Directory name within package for assets
 _DEFAULT_VERSION = "0.2.0"  # Fallback version if unable to determine

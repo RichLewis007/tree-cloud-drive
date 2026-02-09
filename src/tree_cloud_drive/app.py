@@ -20,7 +20,7 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from .core.exceptions import install_exception_hook
-from .core.paths import APP_NAME, APP_ORG, app_icon_bytes, app_version, qss_text
+from .core.paths import APP_DISPLAY_NAME, APP_NAME, APP_ORG, app_icon_bytes, app_version, qss_text
 from .core.settings import Settings
 from .core.single_instance import SingleInstanceGuard
 from .main_window import MainWindow
@@ -44,7 +44,8 @@ def run(
         Exit code from the application event loop (typically 0 for normal exit).
     """
     app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName(APP_DISPLAY_NAME)
+    app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setOrganizationName(APP_ORG)
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 

@@ -51,6 +51,17 @@ include = [
   "pyproject.toml",
 ]
 
+[tool.briefcase]
+project_name = "Tree Cloud Drive"
+bundle = "com.richlewis"
+
+[tool.briefcase.app.tree_cloud_drive]
+formal_name = "Tree Cloud Drive"
+bundle = "com.richlewis"
+version = "0.2.0"
+description = "Browse cloud remotes and folders using rclone."
+sources = ["src/tree_cloud_drive"]
+
 [build-system]
 requires = ["hatchling>=1.24.2"]
 build-backend = "hatchling.build"

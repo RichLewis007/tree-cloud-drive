@@ -21,7 +21,7 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
 
-from ..core.paths import APP_NAME, app_icon_bytes
+from ..core.paths import APP_DISPLAY_NAME, APP_NAME, app_icon_bytes
 from ..core.ui_loader import load_ui
 
 
@@ -49,7 +49,7 @@ class AboutDialog(QDialog):
             parent: Parent widget
         """
         super().__init__(parent)
-        self.setWindowTitle(f"About {APP_NAME}")
+        self.setWindowTitle(f"About {APP_DISPLAY_NAME}")
         # Small rectangular window
         self.setMinimumWidth(350)
         self.setMinimumHeight(200)
@@ -105,7 +105,7 @@ class AboutDialog(QDialog):
             icon_label.setVisible(False)
 
         # App name
-        name_label.setText(f"<h2>{APP_NAME}</h2>")
+        name_label.setText(f"<h2>{APP_DISPLAY_NAME}</h2>")
 
         # Version
         version_label.setText(f"Version {version}")

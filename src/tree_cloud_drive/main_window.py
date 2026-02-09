@@ -16,7 +16,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, Slot, QStandardPaths
+from PySide6.QtCore import QPoint, QSize, Qt, Slot, QStandardPaths, QMetaObject
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QTabWidget,
     QTextEdit,
     QToolBar,
@@ -76,33 +77,41 @@ class MainWindow(QMainWindow):
         self.history_list: QListWidget
         self.clear_history_button: QPushButton
         self.debug_log_view: QTextEdit | None
+        self.status_progress: QProgressBar
         self.ui: QWidget
         self.tab_widget: QTabWidget
         self.view_menu: QMenu
         self.remote_worker: Worker[list[str]] | None
         self.folder_worker: Worker[list[str]] | None
-        self.tree_worker: Worker[list[str]] | None
+        self.tree_workers: dict[str, Worker[list[str]]]
         self._tree_remote: str | None
         self._pending_history_folder: str | None
         self.history_store: HistoryStore
+        self._loading_paths: set[str]
 
         self.setWindowTitle(APP_NAME)
 
         self.history_store = HistoryStore()
         self.debug_log_view = None
+        self._loading_paths = set()
 
         self._build_actions()
         self._build_menus()  # Build menus before loading UI so dock widgets can add to View menu
         self._load_ui()
         self.remote_worker = None
         self.folder_worker = None
-        self.tree_worker = None
+        self.tree_workers = {}
         self._tree_remote = None
         self._pending_history_folder = None
 
         # Create horizontal toolbar with square icon buttons
         toolbar = self._create_toolbar()
         self.addToolBar(toolbar)
+
+        self.status_progress = QProgressBar(self)
+        self.status_progress.setRange(0, 0)
+        self.status_progress.setVisible(False)
+        self.statusBar().addPermanentWidget(self.status_progress)
 
         self.remote_combo.currentIndexChanged.connect(self._on_remote_selected)
         self.folder_combo.currentIndexChanged.connect(self._on_folder_selected)
@@ -309,6 +318,14 @@ class MainWindow(QMainWindow):
         self.label.setText(message)
         self.statusBar().showMessage(message, timeout_ms)
 
+    def _set_loading(self, loading: bool) -> None:
+        if loading:
+            self.status_progress.setVisible(True)
+            return
+        if self._loading_paths or self.remote_worker or self.folder_worker or self.tree_workers:
+            return
+        self.status_progress.setVisible(False)
+
     def _run_rclone(self, args: list[str]) -> list[str]:
         result = subprocess.run(
             ["rclone", *args],
@@ -344,7 +361,11 @@ class MainWindow(QMainWindow):
                     f.write(stderr)
                     if not stderr.endswith("\n"):
                         f.write("\n")
-            self._refresh_debug_log_view()
+            QMetaObject.invokeMethod(
+                self,
+                "_refresh_debug_log_view",
+                Qt.ConnectionType.QueuedConnection,
+            )
         except Exception:
             pass
 
@@ -357,6 +378,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.debug_log_view, "Debug Log")
         self._refresh_debug_log_view()
 
+    @Slot()
     def _refresh_debug_log_view(self) -> None:
         if self.debug_log_view is None:
             return
@@ -386,6 +408,7 @@ class MainWindow(QMainWindow):
         self.folder_combo.addItem("Select a folder...")
         self.folder_tree.clear()
         self._set_status("Loading cloud remotes...")
+        self._set_loading(True)
 
         def work(ctx: WorkContext) -> list[str]:
             ctx.check_cancelled()
@@ -400,14 +423,16 @@ class MainWindow(QMainWindow):
             self.remote_combo.setEnabled(True)
             self._set_status("Select a cloud remote.")
             self.remote_worker = None
+            self._set_loading(False)
 
         def error(msg: str) -> None:
             self.remote_combo.clear()
             self.remote_combo.addItem("Select a remote...")
             self.remote_combo.setEnabled(True)
-            self.remote_worker = None
             QMessageBox.critical(self, "Rclone error", msg)
             self._set_status("Failed to load remotes.")
+            self.remote_worker = None
+            self._set_loading(False)
 
         req = WorkRequest(fn=work, on_done=done, on_error=error)
         self.remote_worker = self.pool.submit(req)
@@ -434,6 +459,7 @@ class MainWindow(QMainWindow):
         self.folder_combo.addItem("Loading folders...")
         self.folder_tree.clear()
         self._set_status(f"Loading folders from {remote}...")
+        self._set_loading(True)
 
         def work(ctx: WorkContext) -> list[str]:
             ctx.check_cancelled()
@@ -456,14 +482,16 @@ class MainWindow(QMainWindow):
                 self.folder_combo.setEnabled(False)
                 self._set_status("No folders found in remote.")
             self.folder_worker = None
+            self._set_loading(False)
 
         def error(msg: str) -> None:
             self.folder_combo.clear()
             self.folder_combo.addItem("Select a folder...")
             self.folder_combo.setEnabled(False)
-            self.folder_worker = None
             QMessageBox.critical(self, "Rclone error", msg)
             self._set_status("Failed to load folders.")
+            self.folder_worker = None
+            self._set_loading(False)
 
         req = WorkRequest(fn=work, on_done=done, on_error=error)
         self.folder_worker = self.pool.submit(req)
@@ -482,19 +510,17 @@ class MainWindow(QMainWindow):
         self._load_folder_tree(remote, folder)
 
     def _load_folder_tree(self, remote: str, folder: str) -> None:
-        if self.tree_worker is not None:
-            self.tree_worker.cancel()
-            self.tree_worker = None
-
         self.folder_tree.clear()
         self._tree_remote = remote
         self._set_status(f"Loading {remote}:{folder}...")
+        self._set_loading(True)
 
         root_item = QTreeWidgetItem([folder])
         self._set_item_path(root_item, folder)
         self._set_item_loaded(root_item, False)
         self._set_tree_placeholder(root_item)
         self.folder_tree.addTopLevelItem(root_item)
+        self._loading_paths.add(folder)
         root_item.setExpanded(True)
 
         def work(ctx: WorkContext) -> list[str]:
@@ -509,16 +535,20 @@ class MainWindow(QMainWindow):
             self._populate_children(root_item, dirs)
             self._set_item_loaded(root_item, True)
             self._set_status(f"Loaded {remote}:{folder}")
-            self.tree_worker = None
+            self._loading_paths.discard(folder)
+            self.tree_workers.pop(folder, None)
+            self._set_loading(False)
 
         def error(msg: str) -> None:
             self.folder_tree.clear()
-            self.tree_worker = None
+            self._loading_paths.discard(folder)
             QMessageBox.critical(self, "Rclone error", msg)
             self._set_status("Failed to load folder tree.")
+            self.tree_workers.pop(folder, None)
+            self._set_loading(False)
 
         req = WorkRequest(fn=work, on_done=done, on_error=error)
-        self.tree_worker = self.pool.submit(req)
+        self.tree_workers[folder] = self.pool.submit(req)
 
     def _populate_children(self, parent: QTreeWidgetItem, paths: list[str]) -> None:
         base_path = self._get_item_path(parent)
@@ -546,14 +576,14 @@ class MainWindow(QMainWindow):
         path = self._get_item_path(item)
         if not path:
             return
+        if path in self._loading_paths:
+            return
         self._load_children_for_item(item, self._tree_remote, path)
 
     def _load_children_for_item(self, item: QTreeWidgetItem, remote: str, path: str) -> None:
-        if self.tree_worker is not None:
-            self.tree_worker.cancel()
-            self.tree_worker = None
-
         self._set_status(f"Loading {remote}:{path}...")
+        self._loading_paths.add(path)
+        self._set_loading(True)
 
         def work(ctx: WorkContext) -> list[str]:
             ctx.check_cancelled()
@@ -565,16 +595,20 @@ class MainWindow(QMainWindow):
             self._populate_children(item, dirs)
             self._set_item_loaded(item, True)
             self._set_status(f"Loaded {remote}:{path}")
-            self.tree_worker = None
+            self._loading_paths.discard(path)
+            self.tree_workers.pop(path, None)
+            self._set_loading(False)
 
         def error(msg: str) -> None:
             self._clear_tree_placeholder(item)
-            self.tree_worker = None
+            self._loading_paths.discard(path)
             QMessageBox.critical(self, "Rclone error", msg)
             self._set_status("Failed to load folder.")
+            self.tree_workers.pop(path, None)
+            self._set_loading(False)
 
         req = WorkRequest(fn=work, on_done=done, on_error=error)
-        self.tree_worker = self.pool.submit(req)
+        self.tree_workers[path] = self.pool.submit(req)
 
     def _refresh_history_list(self) -> None:
         self.history_list.clear()
